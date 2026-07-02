@@ -1,0 +1,89 @@
+name: Auto Convert and Generate JSON
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'raw_wallpapers/**'
+      - 'raw_music/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install Dependencies
+      run: |
+        pip install pillow
+
+    - name: Process Wallpapers and Music
+      run: |
+        python - <<EOF
+        import os
+        import json
+        from PIL import Image
+
+        # --- KONFIGURASI ---
+        # Ganti dengan username GitHub dan nama repo Anda agar URL JSON-nya benar
+        GITHUB_USER = "${{ github.repository_owner }}"
+        REPO_NAME = "${{ github.event.repository.name }}"
+        BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/main"
+
+        # 1. PROSES WALLPAPER
+        os.makedirs("wallpapers", exist_ok=True)
+        wallpaper_list = []
+        
+        if os.path.exists("raw_wallpapers"):
+            for filename in sorted(os.listdir("raw_wallpapers")):
+                if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    name, _ = os.path.splitext(filename)
+                    webp_filename = f"{name}.webp"
+                    input_path = os.path.join("raw_wallpapers", filename)
+                    output_path = os.path.join("wallpapers", webp_filename)
+                    
+                    # Konversi ke WebP jika belum ada atau file mentahnya lebih baru
+                    if not os.path.exists(output_path):
+                        im = Image.open(input_path)
+                        im.save(output_path, "WEBP", quality=85)
+                        print(f"Converted: {filename} -> {webp_filename}")
+                    
+                    wallpaper_list.append({
+                        "name": name.replace("-", " ").replace("_", " ").title(),
+                        "url": f"{BASE_URL}/wallpapers/{webp_filename}"
+                    })
+
+        with open("wallpapers.json", "w") as f:
+            json.dump(wallpaper_list, f, indent=4)
+
+        # 2. PROSES MUSIK
+        music_list = []
+        if os.path.exists("raw_music"):
+            for filename in sorted(os.listdir("raw_music")):
+                if filename.lower().endswith(('.mp3', '.ogg', '.wav')):
+                    name, _ = os.path.splitext(filename)
+                    music_list.append({
+                        "title": name.replace("-", " ").replace("_", " ").title(),
+                        "url": f"{BASE_URL}/raw_music/{filename}"
+                    })
+
+        with open("music.json", "w") as f:
+            json.dump(music_list, f, indent=4)
+
+        print("JSON files successfully updated!")
+        EOF
+
+    - name: Commit and Push Changes
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add wallpapers/*.webp wallpapers.json music.json
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-convert: updated webp and json manifests" && git push)
